@@ -1,0 +1,53 @@
+# vector数据目录
+data_dir: "/etc/vector/access_data"
+sources:
+  access_logs:
+    type: "file"
+    # nginx日志文件
+    include: ["/var/log/nginx/access.log"]
+transforms:
+  parse_access:
+    type: "remap"
+    inputs: ["access_logs"]
+    drop_on_error: true
+    reroute_dropped: true
+    # 根据access日志格式修改parse_grok
+    source: |
+      server_name = .host
+      . = parse_grok!(string!(.message),"%{IPORHOST:remote_addr} - %{DATA:remote_user} \\[%{HTTPDATE:time}\\] \"%{WORD:request_method} %{DATA:uri} HTTP/%{NUMBER:http_version}\" %{NUMBER:status} %{NUMBER:body_sent_bytes} \"%{DATA:http_referrer}\" \"%{DATA:http_user_agent}\"rt=%{NUMBER:request_time} uct=\"%{NUMBER:upstream_connect_time}\" uht=\"%{NUMBER:upstream_header_time}\" urt=\"%{NUMBER:upstream_response_time}\"")
+      .server_name = server_name
+      .application_code = "youwo"
+      tmptim = parse_timestamp!(.time,format: "%d/%b/%Y:%T %z")
+      .time_local = format_timestamp!(tmptim, format: "%+")
+      .stat_date = format_timestamp!(tmptim, format: "%Y-%m-%d","local")
+      .stat_hour = format_timestamp!(tmptim, format: "%H","local")
+      .stat_min = format_timestamp!(tmptim, format: "%H:%M","local")
+      .request_time = to_float!(.request_time)*1000
+      .time= format_timestamp!(tmptim, format: "%F %T")
+sinks:
+  print:
+    type: "console"
+    inputs: ["parse_access"]
+    encoding:
+      codec: "json"
+  aliyun_kafka:
+    type: kafka
+    inputs: [ "parse_access" ]
+    # kafka地址
+    bootstrap_servers: 192.168.1.164:9092
+    compression: none
+    message_timeout_ms: 300000
+    socket_timeout_ms: 60000
+    topic: accesslog
+    batch:
+      max_events: 100
+      timeout_secs: 1
+    encoding:
+      codec: "json"
+  droped_file:
+    type: "file"
+    inputs: [ "parse_access.dropped"]
+    # 解析失败的日志存储文件名
+    path: "/etc/vector/access_data/access_droped.txt"
+    encoding:
+      codec: "json"

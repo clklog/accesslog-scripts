@@ -1,0 +1,66 @@
+# vector数据目录
+data_dir: "D:\\Vector\\iis_data"
+sources:
+  iis_logs:
+    type: "file"
+    # iis日志目录
+    include: ["D:\\WWW_LOG\\W3SVC1\\*.log"]
+    encoding:
+      charset: "utf-8"
+    read_from: beginning
+    ignore_older_secs: 172800
+    fingerprint:
+      strategy: "checksum"
+      lines: 5
+      ignored_header_bytes: 276
+transforms:
+  parse_logs:
+    type: "remap"
+    inputs: ["iis_logs"]
+    timezone: "Asia/Shanghai"
+    drop_on_error: true
+    reroute_dropped: true
+    # 根据iis日志格式修改parse_grok
+    source: |
+      server_name = .host
+      . = parse_grok!(string!(.message),"%{TIMESTAMP_ISO8601:time} %{IPORHOST:s_ip} %{WORD:request_method} %{URIPATH:uri_stem} %{NOTSPACE:uri_query} %{NUMBER:port} %{NOTSPACE:remote_user} %{IPORHOST:c_ip} %{NOTSPACE:http_user_agent} %{NOTSPACE:http_referrer} %{NUMBER:status} %{NUMBER:substatus} %{NUMBER:win32_status} %{NUMBER:request_time} %{IPORHOST:remote_addr}")
+      .server_name = server_name
+      .application_code = "youwo"
+      tmptim = parse_timestamp!(replace!(.time," "," ")+"+0000",format: "%F %T%z")
+      .time_local = format_timestamp!(tmptim, format: "%+","local")
+      .stat_date = format_timestamp!(tmptim, format: "%Y-%m-%d","local")
+      .stat_hour = format_timestamp!(tmptim, format: "%H","local")
+      .stat_min = format_timestamp!(tmptim, format: "%H:%M","local")    
+      .request_time = to_float!(.request_time)
+      if  .uri_query =="-" { .uri=.uri_stem } else {.uri =join!([.uri_stem,.uri_query],"?")}
+sinks:
+  print:
+    type: "console"
+    inputs: ["parse_logs"]
+    encoding:
+     codec: "json"
+  aliyun_kafka:
+    type: kafka
+    inputs: [ "parse_logs" ]
+    # kafka地址
+    bootstrap_servers: 192.168.1.164:9092
+    compression: none
+    message_timeout_ms: 300000
+    socket_timeout_ms: 60000
+    # kafka topic
+    topic: accesslog
+    batch:
+      max_events: 100
+      timeout_secs: 1
+    encoding:
+      codec: "json"
+  droped_file:
+    type: "file"
+    inputs: [ "parse_logs.dropped"]
+    # 解析失败的日志存储文件名
+    path: "D:\\Vector\\iis_data\\iis_droped.txt"
+    encoding:
+      codec: "json"
+
+
+
